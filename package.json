@@ -1,0 +1,18 @@
+{
+  "name": "osia-rendezvous",
+  "version": "1.0.0",
+  "private": true,
+  "description": "OSIA rendezvous service (WOR-64) — maps a rendezvous key to a PC's current Cloudflare quick-tunnel URL so a phone holding the OSIA token can reach its own PC over the internet.",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail",
+    "kv:create": "wrangler kv namespace create KV_RENDEZVOUS",
+    "whoami": "wrangler whoami"
+  },
+  "devDependencies": {
+    "wrangler": "^4.100.0"
+  }
+}

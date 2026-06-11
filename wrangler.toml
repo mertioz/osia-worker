@@ -1,0 +1,54 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# OSIA Rendezvous Worker (WOR-64) — wrangler configuration
+# ═══════════════════════════════════════════════════════════════════════════
+
+name = "osia-rendezvous"
+main = "src/index.js"
+compatibility_date = "2025-09-19"   # Rate Limiting in Workers GA date
+
+# ───────────────────────────────────────────────────────────────────────────
+# KV namespace binding
+#
+# Stores:  rendezvous_key (sha256 hex)  ->  quick-tunnel URL
+#
+# Create the namespace, then paste the returned id below:
+#     npx wrangler kv namespace create KV_RENDEZVOUS
+#
+# >>> REPLACE <KV_NAMESPACE_ID> WITH THE ID PRINTED BY THAT COMMAND <<<
+# ───────────────────────────────────────────────────────────────────────────
+[[kv_namespaces]]
+binding = "KV_RENDEZVOUS"
+id = "093bdbb6bc6343ccbcdae036463caf38"   # created via: wrangler kv namespace create KV_RENDEZVOUS
+
+# ───────────────────────────────────────────────────────────────────────────
+# Plain vars
+# ───────────────────────────────────────────────────────────────────────────
+[vars]
+# KV TTL (seconds) for each published URL. Must be >= 60. The Worker clamps to
+# 60 and falls back to 600 if this is unset/invalid.
+RENDEZVOUS_TTL_SECONDS = "600"
+
+# ───────────────────────────────────────────────────────────────────────────
+# Rate limiting bindings (Cloudflare native, GA `ratelimit`)
+#
+# Per-IP caps keyed on CF-Connecting-IP inside the Worker. Keep limit/period in
+# sync with the constants at the top of src/index.js.
+#   • period MUST be either 10 or 60 (seconds)
+#   • namespace_id is an arbitrary unique integer you choose per limiter
+# ───────────────────────────────────────────────────────────────────────────
+
+# POST /publish — strict: protects the free-tier 1000 KV-writes/day quota.
+[[ratelimits]]
+name = "PUBLISH_LIMITER"
+namespace_id = "1001"
+  [ratelimits.simple]
+  limit = 20
+  period = 60
+
+# GET /r/:key — looser: reads are cheap, but still bound per-IP abuse.
+[[ratelimits]]
+name = "GET_LIMITER"
+namespace_id = "1002"
+  [ratelimits.simple]
+  limit = 120
+  period = 60
