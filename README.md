@@ -96,7 +96,20 @@ correctly. (Hashing the raw proof bytes instead would give
 |-------------------------|-----------------------|--------------------|--------|
 | `POST /publish`         | `{"proof","url"}`     | `200 {"ok":true}`  | `400` invalid proof/url/json, `413` body too large, `429` rate-limited |
 | `GET  /r/:rendezvous_key` | —                   | `200 {"url":...}`  | `400` invalid key, `404` not found, `429` rate-limited |
+| `GET  /oauth/cb/:rendezvous_key` | `?code&state` (relayed verbatim) | relayed close-tab HTML from the PC server | `400` bad key, `404` not found, `429` rate-limited, `502` upstream unreachable |
 | anything else           | —                     | —                  | `405` |
+
+**`GET /oauth/cb/:rendezvous_key` (WOR-98)** — the mobile OAuth flow registers
+`https://<this-worker>/oauth/cb/<rendezvous_key>` as its `redirect_uri`. When the
+provider redirects the browser here, the Worker resolves the key's current
+quick-tunnel origin (same KV lookup as `/r/:key`) and forwards the callback to
+the PC's local server at `<origin>/oauth/callback?<same query>`, then relays the
+server's close-tab HTML back. The Worker is a **blind relay**: the `code` is
+PKCE-locked and single-use and the verifier never leaves the PC, so a code seen
+here is unredeemable. The query string (`code`/`state`) is **never logged**, the
+response is `no-store`, and the forward destination is re-validated against
+`URL_RE` on read so it can only ever be a `*.trycloudflare.com` origin (no
+open-redirect / SSRF). Uses the looser `GET_LIMITER`.
 
 **Validation**
 

@@ -25,9 +25,15 @@
  * they cannot recover any token.
  *
  * Endpoints
- *   POST /publish   body {proof, url}   -> {ok:true}        (PC publishes its URL)
- *   GET  /r/:key                        -> {url} | 404      (phone resolves it)
- *   *    everything else                -> 405
+ *   POST /publish        body {proof, url}  -> {ok:true}    (PC publishes its URL)
+ *   GET  /r/:key                            -> {url} | 404  (phone resolves it)
+ *   GET  /oauth/cb/:key  ?code&state        -> relayed HTML (blind OAuth relay)
+ *        Looks up the key's current quick-tunnel origin and forwards the
+ *        provider's GET callback to <origin>/oauth/callback, relaying the PC
+ *        server's close-tab HTML back. The Worker stays a blind relay: the
+ *        relayed code is PKCE-locked + single-use and the verifier never leaves
+ *        the PC, so the code is unredeemable here. (WOR-98)
+ *   *    everything else                    -> 405
  */
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -182,13 +188,78 @@ async function handleResolve(request, env, key) {
   return json({ url });
 }
 
+/**
+ * GET /oauth/cb/:rendezvous_key — blind relay of a provider OAuth callback (WOR-98).
+ *
+ * The mobile OAuth flow registers `https://<this-worker>/oauth/cb/<key>` as its
+ * redirect_uri. When the provider redirects the browser here, we look up the
+ * key's CURRENT quick-tunnel origin in KV and forward the callback to the PC's
+ * local server at `<origin>/oauth/callback?<same query>` (the WOR-96 route),
+ * then relay that server's close-tab HTML straight back to the browser.
+ *
+ * The Worker never redeems anything: the relayed `code` is PKCE-locked and
+ * single-use, and the PKCE verifier never leaves the PC — so a code seen here is
+ * unredeemable. We therefore (a) never log the query string (code/state),
+ * (b) mark the response no-store, and (c) re-validate the KV value against
+ * URL_RE on read so the forward destination can only ever be a bare
+ * *.trycloudflare.com origin — it is KV-sourced, never request-controlled, which
+ * closes off open-redirect / SSRF. No forward loop is possible: our inbound path
+ * is /oauth/cb/ while the forwarded path is /oauth/callback, and KV only ever
+ * holds trycloudflare origins (the publish regex), never this Worker's host.
+ */
+async function handleOauthCallback(request, env, key, search) {
+  // 1) Per-IP rate limit — reuse the looser GET limiter (same as /r/:key).
+  const { success } = await env.GET_LIMITER.limit({ key: clientIp(request) });
+  if (!success) return rateLimited();
+
+  // 2) Validate key shape before touching KV (avoids junk lookups).
+  if (!KEY_RE.test(key)) {
+    return json({ ok: false, error: 'bad_key' }, 400);
+  }
+
+  // 3) Resolve the current quick-tunnel origin for this key. Re-check URL_RE on
+  //    read (belt-and-suspenders): the destination is KV-sourced and must remain
+  //    a bare trycloudflare origin, so a malformed/stale value is treated as a miss.
+  const target = await env.KV_RENDEZVOUS.get(key);
+  if (target === null || !URL_RE.test(target)) {
+    return json({ ok: false, error: 'not_found' }, 404);
+  }
+
+  // 4) Forward the callback to the PC's local /oauth/callback route, preserving
+  //    the query verbatim. redirect:'manual' so we never auto-follow an upstream
+  //    redirect (SSRF-chaining guard). NB: never log `search` (carries code/state).
+  const fwd = target + '/oauth/callback' + search;
+  let upstream;
+  try {
+    upstream = await fetch(fwd, {
+      method: 'GET',
+      redirect: 'manual',
+      headers: { 'user-agent': 'osia-rendezvous/1.0' },
+    });
+  } catch {
+    return json({ ok: false, error: 'upstream_unreachable' }, 502);
+  }
+
+  // 5) Relay the server's response (close-tab HTML) back to the browser verbatim,
+  //    uncacheable. Default content-type to HTML if the server omitted one.
+  const relayBody = await upstream.text();
+  return new Response(relayBody, {
+    status: upstream.status,
+    headers: {
+      'content-type': upstream.headers.get('content-type') || 'text/html; charset=utf-8',
+      'cache-control': 'no-store',
+    },
+  });
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Worker entrypoint
 // ─────────────────────────────────────────────────────────────────────────
 
 export default {
   async fetch(request, env) {
-    const { pathname } = new URL(request.url);
+    const url = new URL(request.url);
+    const { pathname } = url;
     const { method } = request;
 
     if (method === 'POST' && pathname === '/publish') {
@@ -200,9 +271,15 @@ export default {
       return handleResolve(request, env, pathname.slice('/r/'.length));
     }
 
+    if (method === 'GET' && pathname.startsWith('/oauth/cb/')) {
+      // Path tail after '/oauth/cb/' is the candidate rendezvous key (validated in
+      // handler); url.search carries the provider's ?code&state, relayed verbatim.
+      return handleOauthCallback(request, env, pathname.slice('/oauth/cb/'.length), url.search);
+    }
+
     // Spec: all other routes/methods -> 405.
     return json({ ok: false, error: 'method_not_allowed' }, 405, {
-      allow: 'POST /publish, GET /r/:rendezvous_key',
+      allow: 'POST /publish, GET /r/:rendezvous_key, GET /oauth/cb/:rendezvous_key',
     });
   },
 };
