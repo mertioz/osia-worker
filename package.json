@@ -7,12 +7,19 @@
   "main": "src/index.js",
   "scripts": {
     "dev": "wrangler dev",
+    "dev:relay": "wrangler dev --config wrangler.relay.toml",
     "deploy": "wrangler deploy",
+    "deploy:relay": "wrangler deploy --config wrangler.relay.toml",
+    "test:relay": "node --test test/relay_priority.test.js && npm run test:relay:worker",
+    "test:relay:worker": "vitest run test/relay_websocket.test.js",
     "tail": "wrangler tail",
+    "tail:relay": "wrangler tail osia-relay",
     "kv:create": "wrangler kv namespace create KV_RENDEZVOUS",
     "whoami": "wrangler whoami"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.18.4",
+    "vitest": "^4.1.10",
     "wrangler": "^4.100.0"
   }
 }

@@ -1,0 +1,49 @@
+name = "osia-relay"
+main = "src/relay.js"
+compatibility_date = "2026-07-06"
+workers_dev = false
+preview_urls = false
+
+[vars]
+MAX_FRAME_BYTES = "65536"
+BACKPRESSURE_BYTES = "262144"
+MAX_BATCH_ITEMS = "32"
+RELAY_GUARD_MODE = "enforce"
+RELAY_ACCEPT_NEW_SESSIONS = "true"
+RELAY_HANDSHAKE_TIMEOUT_MS = "10000"
+RELAY_PREAUTH_MESSAGES_PER_SECOND = "1"
+RELAY_PREAUTH_MESSAGE_BURST = "4"
+RELAY_PREAUTH_BYTES_PER_SECOND = "4096"
+RELAY_PREAUTH_BYTE_BURST = "16384"
+RELAY_POSTAUTH_MESSAGES_PER_SECOND = "200"
+RELAY_POSTAUTH_MESSAGE_BURST = "512"
+RELAY_POSTAUTH_BYTES_PER_SECOND = "2097152"
+RELAY_POSTAUTH_BYTE_BURST = "12582912"
+RELAY_POSTAUTH_BYTES_PER_MINUTE = "67108864"
+RELAY_MAX_CHUNK_INFLIGHT = "4"
+RELAY_CHUNK_TIMEOUT_MS = "30000"
+RELAY_HARD_BACKPRESSURE_BYTES = "33554432"
+RELAY_ERROR_RESPONSES_PER_MINUTE = "16"
+RELAY_ERROR_RESPONSE_BURST = "8"
+
+[[ratelimits]]
+name = "RELAY_UPGRADE_LIMITER"
+namespace_id = "12101"
+  [ratelimits.simple]
+  limit = 600
+  period = 60
+
+[observability]
+enabled = true
+
+[[durable_objects.bindings]]
+name = "RELAY_SESSION"
+class_name = "RelaySession"
+
+[[migrations]]
+tag = "relay-v1"
+new_sqlite_classes = ["RelaySession"]
+
+[[routes]]
+pattern = "relay.osia.space"
+custom_domain = true
