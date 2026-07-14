@@ -1,0 +1,14 @@
+title = "OSIA Worker secret scanning"
+
+[extend]
+useDefault = true
+
+# Public deterministic reference vector. The policy test recomputes it from
+# the explicitly documented demo token before this exception is accepted.
+[[allowlists]]
+description = "README deterministic rendezvous reference vector"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''(^|[\/])README\.md$''']
+regexTarget = "line"
+regexes = ['''(?m)^rendezvous_key\s*=\s*[a-f0-9]{64}\s*$''']
