@@ -43,6 +43,9 @@ namespace_id = "12102"
 [observability]
 enabled = true
 
+[observability.logs]
+invocation_logs = false
+
 [[durable_objects.bindings]]
 name = "RELAY_SESSION"
 class_name = "RelaySession"
