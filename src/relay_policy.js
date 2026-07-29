@@ -83,8 +83,14 @@ const UTF8_ENCODER = new TextEncoder();
 
 const LOG_DENY_KEYS = new Set([
   "auth_hash",
+  "authorization",
+  "callback_id",
+  "callback_url",
+  "code",
+  "cookie",
   "device",
   "device_id",
+  "error_description",
   "chunk",
   "chunk_body",
   "chunk_id",
@@ -97,19 +103,24 @@ const LOG_DENY_KEYS = new Set([
   "conversation_id",
   "frame",
   "frames",
+  "flow_ref",
   "from",
   "generation",
   "instructions",
   "kid",
   "memory",
   "nonce",
+  "oauth_payload",
   "pair",
   "pair_id",
+  "pair_proof",
   "payload",
   "secret",
+  "relay_secret",
   "session",
   "session_id",
   "settings",
+  "state",
   "title",
   "token",
   "to",
@@ -288,6 +299,19 @@ export function sanitizeRelayLogData(data = {}) {
     }
     if (typeof value === "string") {
       safe[key] = value.length > 160 ? `${value.slice(0, 160)}...` : value;
+      continue;
+    }
+    if (Array.isArray(value)) {
+      safe[key] = value.map((item) =>
+        item && typeof item === "object"
+          ? sanitizeRelayLogData(item)
+          : (typeof item === "string" && item.length > 160
+              ? `${item.slice(0, 160)}...`
+              : item));
+      continue;
+    }
+    if (value && typeof value === "object") {
+      safe[key] = sanitizeRelayLogData(value);
       continue;
     }
     safe[key] = value;

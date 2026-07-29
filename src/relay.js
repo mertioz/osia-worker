@@ -23,6 +23,25 @@ import {
   relayGuard,
   wouldExceedBackpressure,
 } from "./relay_guard.js";
+import {
+  handleOAuthCallbackRequest,
+  isOAuthControlType,
+  isValidCallbackId,
+  OAUTH_CALLBACK_PATH,
+  OAUTH_DEFAULT_TTL_SECONDS,
+  OAUTH_MAX_ACTIVE_FLOWS,
+  OAUTH_MAX_PENDING_CALLBACKS,
+  OAUTH_SCHEMA_VERSION,
+  OAuthCallbackFlow,
+  TYPE_OAUTH_CALLBACK,
+  TYPE_OAUTH_CALLBACK_ACK,
+  TYPE_OAUTH_FLOW_CANCEL,
+  TYPE_OAUTH_FLOW_REGISTER,
+  TYPE_OAUTH_FLOW_REGISTERED,
+  validateOAuthControlEnvelope,
+} from "./oauth_callback.js";
+
+export { OAuthCallbackFlow };
 
 const VERSION_V1 = 1;
 const VERSION_V2 = 2;
@@ -38,6 +57,14 @@ const TYPE_DISCONNECT = "DISCONNECT";
 const TYPE_ERROR = "ERROR";
 const TYPE_RECONNECT_RESUME = "RECONNECT_RESUME";
 const TYPE_E2E_CHUNK = "E2E_CHUNK";
+
+const OAUTH_FLOW_PREFIX = "oauth:flow:";
+const OAUTH_MAILBOX_PREFIX = "oauth:mailbox:";
+const OAUTH_ACK_PREFIX = "oauth:ack:";
+const OAUTH_ACK_RETRY_WINDOW_MS = 30_000;
+const OAUTH_CONTROL_RATE_PER_MINUTE = 12;
+const OAUTH_CONTROL_BURST = 8;
+const OAUTH_ERROR_RE = /^[A-Za-z0-9._~-]{1,128}$/;
 
 const PAIR_ID_RE = /^[0-9a-f]{64}$/;
 const ID_RE = /^[A-Za-z0-9_.:-]{4,128}$/;
@@ -240,6 +267,7 @@ function safeClose(ws, code, reason) {
 export class RelaySession extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
+    this.env = env;
     this.policy = relayPolicy(env);
     this.guard = relayGuard(env);
     this.maxFrameBytes = this.guard.maxFrameBytes;
@@ -352,15 +380,40 @@ export class RelaySession extends DurableObject {
     );
   }
 
-  async refreshHandshakeAlarm() {
-    if (!this.guard.enforce) return;
+  async refreshRelayAlarm() {
     let earliest = null;
-    for (const socket of this.ctx.getWebSockets()) {
-      const meta = readMeta(socket);
-      const deadline = Number(meta.handshake_deadline);
-      if (meta.authenticated !== true && Number.isFinite(deadline) &&
-          deadline > 0) {
-        earliest = earliest === null ? deadline : Math.min(earliest, deadline);
+    if (this.guard.enforce) {
+      for (const socket of this.ctx.getWebSockets()) {
+        const meta = readMeta(socket);
+        const deadline = Number(meta.handshake_deadline);
+        if (meta.authenticated !== true && Number.isFinite(deadline) &&
+            deadline > 0) {
+          earliest = earliest === null ? deadline : Math.min(earliest, deadline);
+        }
+      }
+    }
+    for (const [, entry] of await this.ctx.storage.list({
+      prefix: OAUTH_FLOW_PREFIX,
+    })) {
+      const expiresAt = Number(entry?.expires_at);
+      if (Number.isFinite(expiresAt) && expiresAt > 0) {
+        earliest = earliest === null ? expiresAt : Math.min(earliest, expiresAt);
+      }
+    }
+    for (const [, entry] of await this.ctx.storage.list({
+      prefix: OAUTH_MAILBOX_PREFIX,
+    })) {
+      const expiresAt = Number(entry?.expires_at);
+      if (Number.isFinite(expiresAt) && expiresAt > 0) {
+        earliest = earliest === null ? expiresAt : Math.min(earliest, expiresAt);
+      }
+    }
+    for (const [, entry] of await this.ctx.storage.list({
+      prefix: OAUTH_ACK_PREFIX,
+    })) {
+      const nextRetry = Number(entry?.next_retry_at || entry?.cleanup_at);
+      if (Number.isFinite(nextRetry) && nextRetry > 0) {
+        earliest = earliest === null ? nextRetry : Math.min(earliest, nextRetry);
       }
     }
     const current = await this.ctx.storage.getAlarm();
@@ -372,25 +425,27 @@ export class RelaySession extends DurableObject {
   }
 
   async alarm() {
-    if (!this.guard.enforce) return;
     const now = Date.now();
-    for (const socket of this.ctx.getWebSockets()) {
-      const meta = readMeta(socket);
-      const deadline = Number(meta.handshake_deadline);
-      if (meta.authenticated === true || !isHandshakeExpired(deadline, now)) {
-        continue;
+    if (this.guard.enforce) {
+      for (const socket of this.ctx.getWebSockets()) {
+        const meta = readMeta(socket);
+        const deadline = Number(meta.handshake_deadline);
+        if (meta.authenticated === true || !isHandshakeExpired(deadline, now)) {
+          continue;
+        }
+        this.sendError(
+          socket,
+          "handshake_timeout",
+          "relay handshake timed out",
+          { force: true },
+        );
+        meta.handshake_deadline = null;
+        writeMeta(socket, meta);
+        safeClose(socket, CLOSE_POLICY_VIOLATION, "handshake_timeout");
       }
-      this.sendError(
-        socket,
-        "handshake_timeout",
-        "relay handshake timed out",
-        { force: true },
-      );
-      meta.handshake_deadline = null;
-      writeMeta(socket, meta);
-      safeClose(socket, CLOSE_POLICY_VIOLATION, "handshake_timeout");
     }
-    await this.refreshHandshakeAlarm();
+    await this.processOAuthAlarm(now);
+    await this.refreshRelayAlarm();
   }
 
   async fetch(request) {
@@ -428,7 +483,7 @@ export class RelaySession extends DurableObject {
 
     this.ctx.acceptWebSocket(server);
     writeMeta(server, meta);
-    await this.refreshHandshakeAlarm();
+    await this.refreshRelayAlarm();
 
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -506,6 +561,29 @@ export class RelaySession extends DurableObject {
       return;
     }
     this.expireChunkTransfers(ws, meta, now);
+
+    if (isOAuthControlType(msg.type)) {
+      if (meta.protocol_version !== VERSION_V2 || meta.role !== ROLE_PC) {
+        this.sendError(
+          ws,
+          "oauth_control_forbidden",
+          "OAuth relay controls require the authoritative PC role",
+        );
+        return;
+      }
+      const oauthError = validateOAuthControlEnvelope(msg);
+      if (oauthError) {
+        this.sendError(ws, oauthError, "invalid OAuth relay control");
+        return;
+      }
+      if (!this.chargeOAuthControlBudget(ws, meta, now)) {
+        this.sendError(ws, "oauth_rate_limited", "OAuth relay control rate exceeded");
+        return;
+      }
+      if (!this.acceptSequence(ws, meta, msg)) return;
+      await this.handleOAuthControl(ws, meta, msg);
+      return;
+    }
 
     if (meta.protocol_version === VERSION_V2 &&
         msg.type === TYPE_RECONNECT_RESUME) {
@@ -640,7 +718,7 @@ export class RelaySession extends DurableObject {
       ? 1
       : (Number(msg.seq) || 0);
     writeMeta(ws, meta);
-    await this.refreshHandshakeAlarm();
+    await this.refreshRelayAlarm();
 
     if (this.rejectMixedProtocolPeers()) return;
 
@@ -656,6 +734,10 @@ export class RelaySession extends DurableObject {
         : {}),
     })));
 
+    if (meta.protocol_version === VERSION_V2 && meta.role === ROLE_PC) {
+      await this.replayOAuthCallbacks(ws, meta);
+    }
+
     const readyType = meta.role === ROLE_PC ? TYPE_PC_READY : TYPE_MOBILE_READY;
     this.routeToPeer(ws, meta, envelope(readyType, meta, {}), { system: true });
     this.sampledLog("info", "relay_pair_confirmed", {
@@ -664,6 +746,394 @@ export class RelaySession extends DurableObject {
       connections: this.ctx.getWebSockets().length,
       policy: this.policy.mode,
     });
+  }
+
+  chargeOAuthControlBudget(ws, meta, now) {
+    if (this.guard.mode === "off") return true;
+    meta.guard_buckets ||= {};
+    const allowed = consumeTokenBucket(
+      meta.guard_buckets,
+      "oauth_control_messages",
+      1,
+      {
+        capacity: OAUTH_CONTROL_BURST,
+        refillPerSecond: OAUTH_CONTROL_RATE_PER_MINUTE / 60,
+      },
+      now,
+    );
+    writeMeta(ws, meta);
+    return allowed || !this.guard.enforce;
+  }
+
+  flowStub(callbackId) {
+    return this.env.OAUTH_CALLBACK_FLOW.getByName(callbackId);
+  }
+
+  oauthFlowKey(callbackId) {
+    return `${OAUTH_FLOW_PREFIX}${callbackId}`;
+  }
+
+  oauthMailboxKey(callbackId) {
+    return `${OAUTH_MAILBOX_PREFIX}${callbackId}`;
+  }
+
+  oauthAckKey(callbackId) {
+    return `${OAUTH_ACK_PREFIX}${callbackId}`;
+  }
+
+  async pruneExpiredOAuthEntries(now = Date.now()) {
+    const deletions = new Set();
+    for (const [key, entry] of await this.ctx.storage.list({
+      prefix: OAUTH_FLOW_PREFIX,
+    })) {
+      if (Number(entry?.expires_at) <= now) {
+        deletions.add(key);
+        deletions.add(this.oauthMailboxKey(entry.callback_id));
+      }
+    }
+    for (const [key, entry] of await this.ctx.storage.list({
+      prefix: OAUTH_MAILBOX_PREFIX,
+    })) {
+      if (Number(entry?.expires_at) <= now) deletions.add(key);
+    }
+    for (const [key, entry] of await this.ctx.storage.list({
+      prefix: OAUTH_ACK_PREFIX,
+    })) {
+      if (Number(entry?.cleanup_at) <= now) deletions.add(key);
+    }
+    for (const key of deletions) await this.ctx.storage.delete(key);
+  }
+
+  async handleOAuthControl(ws, meta, msg) {
+    let result;
+    if (msg.type === TYPE_OAUTH_FLOW_REGISTER) {
+      result = await this.registerOAuthFlow(meta, msg.payload);
+      if (result.status === "registered") {
+        ws.send(JSON.stringify(envelope(TYPE_OAUTH_FLOW_REGISTERED, meta, {
+          schema_version: OAUTH_SCHEMA_VERSION,
+          callback_id: msg.payload.callback_id,
+          expires_at: result.expires_at,
+        })));
+        return;
+      }
+    } else if (msg.type === TYPE_OAUTH_FLOW_CANCEL) {
+      result = await this.cancelOAuthFlow(meta, msg.payload);
+      if (result.status === "cancelled") return;
+    } else if (msg.type === TYPE_OAUTH_CALLBACK_ACK) {
+      result = await this.acknowledgeOAuthCallback(meta, msg.payload);
+      if (result.status === "acknowledged") return;
+    }
+    const code = result?.status === "quota"
+      ? "oauth_flow_quota"
+      : result?.status === "conflict"
+        ? "oauth_flow_conflict"
+        : result?.status === "gone"
+          ? "oauth_flow_gone"
+          : "oauth_temporarily_unavailable";
+    this.sendError(ws, code, "OAuth relay control was not accepted");
+  }
+
+  async registerOAuthFlow(meta, payload) {
+    const now = Date.now();
+    await this.pruneExpiredOAuthEntries(now);
+    const flowKey = this.oauthFlowKey(payload.callback_id);
+    const existing = await this.ctx.storage.get(flowKey);
+    if (existing && existing.flow_kind !== payload.flow_kind) {
+      return { status: "conflict" };
+    }
+    if (!existing) {
+      const active = await this.ctx.storage.list({ prefix: OAUTH_FLOW_PREFIX });
+      if (active.size >= OAUTH_MAX_ACTIVE_FLOWS) return { status: "quota" };
+      const requestedTtl = Math.min(
+        300,
+        Math.max(30, payload.ttl_seconds ?? OAUTH_DEFAULT_TTL_SECONDS),
+      );
+      await this.ctx.storage.put(flowKey, {
+        schema_version: OAUTH_SCHEMA_VERSION,
+        callback_id: payload.callback_id,
+        flow_kind: payload.flow_kind,
+        created_at: now,
+        expires_at: now + requestedTtl * 1000,
+        registration_pending: true,
+      });
+    }
+
+    let registered;
+    try {
+      registered = await this.flowStub(payload.callback_id).registerFlow({
+        schema_version: OAUTH_SCHEMA_VERSION,
+        callback_id: payload.callback_id,
+        pair_id: meta.pair_id,
+        flow_kind: payload.flow_kind,
+        ttl_seconds: payload.ttl_seconds ?? OAUTH_DEFAULT_TTL_SECONDS,
+      });
+    } catch {
+      await this.refreshRelayAlarm();
+      return { status: "unavailable" };
+    }
+    if (registered?.status !== "registered") {
+      if (!existing) await this.ctx.storage.delete(flowKey);
+      await this.refreshRelayAlarm();
+      return { status: registered?.status || "unavailable" };
+    }
+    const flow = {
+      schema_version: OAUTH_SCHEMA_VERSION,
+      callback_id: payload.callback_id,
+      flow_kind: payload.flow_kind,
+      created_at: existing?.created_at || now,
+      expires_at: registered.expires_at,
+      registration_pending: false,
+    };
+    await this.ctx.storage.put(flowKey, flow);
+    await this.refreshRelayAlarm();
+    return { status: "registered", expires_at: flow.expires_at };
+  }
+
+  async cancelOAuthFlow(meta, payload) {
+    const flowKey = this.oauthFlowKey(payload.callback_id);
+    const mailboxKey = this.oauthMailboxKey(payload.callback_id);
+    const ackKey = this.oauthAckKey(payload.callback_id);
+    const local = await this.ctx.storage.get(flowKey);
+    if (!local) return { status: "cancelled" };
+    let cancelled;
+    try {
+      cancelled = await this.flowStub(payload.callback_id).cancelFlow({
+        schema_version: OAUTH_SCHEMA_VERSION,
+        pair_id: meta.pair_id,
+        callback_id: payload.callback_id,
+      });
+    } catch {
+      return { status: "unavailable" };
+    }
+    if (!["cancelled", "gone"].includes(cancelled?.status)) {
+      return { status: cancelled?.status || "unavailable" };
+    }
+    await this.ctx.storage.delete(flowKey);
+    await this.ctx.storage.delete(mailboxKey);
+    await this.ctx.storage.delete(ackKey);
+    await this.refreshRelayAlarm();
+    return { status: "cancelled" };
+  }
+
+  async acknowledgeOAuthCallback(meta, payload) {
+    const flowKey = this.oauthFlowKey(payload.callback_id);
+    const mailboxKey = this.oauthMailboxKey(payload.callback_id);
+    const ackKey = this.oauthAckKey(payload.callback_id);
+    const [flow, mailbox, pendingAck] = await Promise.all([
+      this.ctx.storage.get(flowKey),
+      this.ctx.storage.get(mailboxKey),
+      this.ctx.storage.get(ackKey),
+    ]);
+    if (!flow && !mailbox && !pendingAck) return { status: "acknowledged" };
+    if (!mailbox && !pendingAck) return { status: "conflict" };
+    if (pendingAck && pendingAck.disposition !== payload.disposition) {
+      return { status: "conflict" };
+    }
+
+    await this.ctx.storage.delete(mailboxKey);
+    const now = Date.now();
+    const ack = pendingAck || {
+      schema_version: OAUTH_SCHEMA_VERSION,
+      callback_id: payload.callback_id,
+      disposition: payload.disposition,
+      attempts: 0,
+      next_retry_at: now,
+      cleanup_at: Math.max(
+        now + OAUTH_ACK_RETRY_WINDOW_MS,
+        Number(flow?.expires_at || now) + OAUTH_ACK_RETRY_WINDOW_MS,
+      ),
+    };
+    await this.ctx.storage.put(ackKey, ack);
+    await this.notifyOAuthAck(meta.pair_id, ack);
+    await this.refreshRelayAlarm();
+    return { status: "acknowledged" };
+  }
+
+  async notifyOAuthAck(pairId, ack) {
+    let acknowledged = false;
+    try {
+      const result = await this.flowStub(ack.callback_id).acknowledgeCallback({
+        schema_version: OAUTH_SCHEMA_VERSION,
+        pair_id: pairId,
+        callback_id: ack.callback_id,
+        disposition: ack.disposition,
+      });
+      acknowledged = result?.status === "acknowledged" ||
+        result?.status === "gone";
+    } catch {
+      acknowledged = false;
+    }
+    const ackKey = this.oauthAckKey(ack.callback_id);
+    if (acknowledged) {
+      await this.ctx.storage.delete(ackKey);
+      await this.ctx.storage.delete(this.oauthFlowKey(ack.callback_id));
+      return true;
+    }
+    const attempts = ack.attempts + 1;
+    await this.ctx.storage.put(ackKey, {
+      ...ack,
+      attempts,
+      next_retry_at: Math.min(
+        ack.cleanup_at,
+        Date.now() + Math.min(15_000, 2_000 * 2 ** Math.min(attempts - 1, 3)),
+      ),
+    });
+    return false;
+  }
+
+  validateOAuthMailboxEntry(input) {
+    if (!input || typeof input !== "object" || Array.isArray(input) ||
+        input.schema_version !== OAUTH_SCHEMA_VERSION ||
+        !PAIR_ID_RE.test(String(input.pair_id || "")) ||
+        !isValidCallbackId(input.callback_id) ||
+        !["gmail", "mcp"].includes(input.flow_kind) ||
+        !Number.isSafeInteger(input.created_at) ||
+        !Number.isSafeInteger(input.expires_at) ||
+        input.expires_at <= input.created_at) {
+      return false;
+    }
+    const hasCode = Object.hasOwn(input, "code");
+    const hasError = Object.hasOwn(input, "error");
+    if (hasCode === hasError) return false;
+    const allowed = hasCode
+      ? new Set([
+          "schema_version", "pair_id", "callback_id", "flow_kind",
+          "code", "created_at", "expires_at",
+        ])
+      : new Set([
+          "schema_version", "pair_id", "callback_id", "flow_kind",
+          "error", "error_description", "created_at", "expires_at",
+        ]);
+    if (!Object.keys(input).every((field) => allowed.has(field))) return false;
+    if (hasCode) {
+      return typeof input.code === "string" && input.code.length > 0 &&
+        utf8ByteLength(input.code) <= 4096;
+    }
+    if (!OAUTH_ERROR_RE.test(String(input.error || ""))) return false;
+    if (Object.hasOwn(input, "error_description")) {
+      return typeof input.error_description === "string" &&
+        [...input.error_description].length <= 256 &&
+        !/[\u0000-\u001f\u007f-\u009f]/.test(input.error_description);
+    }
+    return true;
+  }
+
+  async enqueueOAuthCallback(input) {
+    if (!this.validateOAuthMailboxEntry(input)) return { status: "invalid" };
+    const authHash = await this.ctx.storage.get("auth_hash");
+    if (authHash !== input.pair_id) return { status: "conflict" };
+    const now = Date.now();
+    await this.pruneExpiredOAuthEntries(now);
+    const flow = await this.ctx.storage.get(this.oauthFlowKey(input.callback_id));
+    if (!flow || flow.flow_kind !== input.flow_kind ||
+        flow.expires_at !== input.expires_at || flow.expires_at <= now) {
+      return { status: "gone" };
+    }
+
+    const mailboxKey = this.oauthMailboxKey(input.callback_id);
+    const existing = await this.ctx.storage.get(mailboxKey);
+    const entry = {
+      schema_version: OAUTH_SCHEMA_VERSION,
+      callback_id: input.callback_id,
+      flow_kind: input.flow_kind,
+      ...(Object.hasOwn(input, "code") ? { code: input.code } : {
+        error: input.error,
+        ...(Object.hasOwn(input, "error_description")
+          ? { error_description: input.error_description }
+          : {}),
+      }),
+      created_at: input.created_at,
+      expires_at: input.expires_at,
+    };
+    if (existing) {
+      if (JSON.stringify(existing) !== JSON.stringify(entry)) {
+        return { status: "conflict" };
+      }
+      this.deliverOAuthCallback(entry);
+      return { status: "duplicate" };
+    }
+    const pending = await this.ctx.storage.list({ prefix: OAUTH_MAILBOX_PREFIX });
+    if (pending.size >= OAUTH_MAX_PENDING_CALLBACKS) return { status: "quota" };
+    await this.ctx.storage.put(mailboxKey, entry);
+    this.deliverOAuthCallback(entry);
+    await this.refreshRelayAlarm();
+    return { status: "enqueued" };
+  }
+
+  deliverOAuthCallback(entry, target = null) {
+    const pc = target || this.selectCurrentV2Socket(ROLE_PC);
+    if (!pc || pc.readyState !== WebSocket.OPEN) return false;
+    const meta = readMeta(pc);
+    if (!this.isAuthoritativeV2Socket(pc, meta) || meta.role !== ROLE_PC) {
+      return false;
+    }
+    const outbound = envelope(TYPE_OAUTH_CALLBACK, meta, {
+      schema_version: OAUTH_SCHEMA_VERSION,
+      callback_id: entry.callback_id,
+      flow_kind: entry.flow_kind,
+      ...(Object.hasOwn(entry, "code") ? { code: entry.code } : {
+        error: entry.error,
+        ...(Object.hasOwn(entry, "error_description")
+          ? { error_description: entry.error_description }
+          : {}),
+      }),
+      expires_at: entry.expires_at,
+    });
+    const serialized = JSON.stringify(outbound);
+    if (wouldExceedBackpressure(
+      pc.bufferedAmount,
+      utf8ByteLength(serialized),
+      this.guard.hardBackpressureBytes,
+    )) return false;
+    try {
+      pc.send(serialized);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async replayOAuthCallbacks(ws, meta) {
+    if (!this.isAuthoritativeV2Socket(ws, meta) || meta.role !== ROLE_PC) return;
+    const now = Date.now();
+    await this.pruneExpiredOAuthEntries(now);
+    const entries = [...(await this.ctx.storage.list({
+      prefix: OAUTH_MAILBOX_PREFIX,
+    })).values()]
+      .filter((entry) => Number(entry.expires_at) > now)
+      .sort((left, right) => left.created_at - right.created_at ||
+        left.callback_id.localeCompare(right.callback_id));
+    for (const entry of entries) this.deliverOAuthCallback(entry, ws);
+    await this.refreshRelayAlarm();
+  }
+
+  async removeOAuthCallback(input) {
+    if (!input || typeof input !== "object" || Array.isArray(input) ||
+        input.schema_version !== OAUTH_SCHEMA_VERSION ||
+        !PAIR_ID_RE.test(String(input.pair_id || "")) ||
+        !isValidCallbackId(input.callback_id)) {
+      return { status: "invalid" };
+    }
+    const authHash = await this.ctx.storage.get("auth_hash");
+    if (authHash !== input.pair_id) return { status: "conflict" };
+    await this.ctx.storage.delete(this.oauthMailboxKey(input.callback_id));
+    await this.ctx.storage.delete(this.oauthFlowKey(input.callback_id));
+    await this.ctx.storage.delete(this.oauthAckKey(input.callback_id));
+    await this.refreshRelayAlarm();
+    return { status: "removed" };
+  }
+
+  async processOAuthAlarm(now) {
+    await this.pruneExpiredOAuthEntries(now);
+    const authHash = await this.ctx.storage.get("auth_hash");
+    if (!PAIR_ID_RE.test(String(authHash || ""))) return;
+    for (const [, ack] of await this.ctx.storage.list({
+      prefix: OAUTH_ACK_PREFIX,
+    })) {
+      if (Number(ack.next_retry_at) <= now && Number(ack.cleanup_at) > now) {
+        await this.notifyOAuthAck(authHash, ack);
+      }
+    }
   }
 
   validateV2PairStart(meta, msg) {
@@ -1179,7 +1649,7 @@ export class RelaySession extends DurableObject {
         meta.superseded === true ||
         (meta.protocol_version === VERSION_V2 &&
           meta.authoritative !== true)) {
-      if (meta.authenticated !== true) await this.refreshHandshakeAlarm();
+      if (meta.authenticated !== true) await this.refreshRelayAlarm();
       return;
     }
     if (meta.protocol_version === VERSION_V2) {
@@ -1208,6 +1678,9 @@ export class RelaySession extends DurableObject {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname === OAUTH_CALLBACK_PATH) {
+      return handleOAuthCallbackRequest(request, env);
+    }
     if (request.method === "GET" && url.pathname === "/health") {
       return json({ ok: true, service: "osia-relay" });
     }

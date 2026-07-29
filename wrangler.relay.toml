@@ -33,6 +33,13 @@ namespace_id = "12101"
   limit = 600
   period = 60
 
+[[ratelimits]]
+name = "OAUTH_CALLBACK_LIMITER"
+namespace_id = "12102"
+  [ratelimits.simple]
+  limit = 120
+  period = 60
+
 [observability]
 enabled = true
 
@@ -40,9 +47,17 @@ enabled = true
 name = "RELAY_SESSION"
 class_name = "RelaySession"
 
+[[durable_objects.bindings]]
+name = "OAUTH_CALLBACK_FLOW"
+class_name = "OAuthCallbackFlow"
+
 [[migrations]]
 tag = "relay-v1"
 new_sqlite_classes = ["RelaySession"]
+
+[[migrations]]
+tag = "relay-v2-oauth-callback"
+new_sqlite_classes = ["OAuthCallbackFlow"]
 
 [[routes]]
 pattern = "relay.osia.space"
