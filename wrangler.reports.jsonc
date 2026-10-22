@@ -1,0 +1,16 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "osia-content-reports",
+  "main": "src/content_reports.js",
+  "compatibility_date": "2026-10-22",
+  "workers_dev": true,
+  "preview_urls": false,
+  "kv_namespaces": [
+    { "binding": "CONTENT_REPORTS", "id": "9cce45e1aa9c497cb6bfc8d76ac8986e" }
+  ],
+  "ratelimits": [
+    { "name": "REPORT_LIMITER", "namespace_id": "12103", "simple": { "limit": 3, "period": 60 } },
+    { "name": "REPORT_GLOBAL_LIMITER", "namespace_id": "12104", "simple": { "limit": 10, "period": 60 } }
+  ],
+  "observability": { "enabled": false }
+}
