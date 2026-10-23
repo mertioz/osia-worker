@@ -6,15 +6,14 @@
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
   "preview_urls": false,
-  // Intentionally no route. Add admin.osia.space only after operator approval
-  // and after a whole-host Access application with single-owner MFA exists.
+  // Operator approved this dedicated host; Cloudflare account 2FA is deferred.
+  // Whole-host Access plus independent exact-owner JWT authorization are required.
+  "routes": [{ "pattern": "admin.osia.space", "custom_domain": true }],
   "vars": {
     "ADMIN_ORIGIN": "https://admin.osia.space",
-    "ACCESS_ISSUER": "https://odd-hat-37c6.cloudflareaccess.com",
-    "ACCESS_AUD": "",
-    "ADMIN_EMAIL": "",
-    "ADMIN_SUB": ""
+    "ACCESS_ISSUER": "https://odd-hat-37c6.cloudflareaccess.com"
   },
+  "secrets": { "required": ["ACCESS_AUD", "ADMIN_EMAIL", "ADMIN_SUB"] },
   "assets": {
     "directory": "./admin/public",
     "binding": "ADMIN_ASSETS",

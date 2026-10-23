@@ -1,9 +1,9 @@
 # Owner-only report moderation
 
-Implementation date: 23 October 2026. **ACCESS PREPARED; SERVICE NOT DEPLOYED**.
+Implementation date: 23 October 2026. **DEPLOYMENT AUTHORIZED; VALIDATION IN PROGRESS**.
 The operator's existing Cloudflare identity is mapped and restricted below.
-Account 2FA is **OPERATOR_DEFERRED**, and final deployment approval and live
-authentication acceptance remain **OPERATOR_PENDING**.
+Account 2FA is **OPERATOR_DEFERRED** by explicit operator instruction. Deployment
+to this host is now explicitly authorized; live acceptance remains pending.
 Intended address: `https://admin.osia.space/reports`.
 
 This is a separate Worker, `osia-reports-admin`, in the primary `osia-worker`
@@ -157,12 +157,12 @@ Long expiry timers are bounded to avoid the browser's 32-bit timer overflow.
 The interface has EN/FR labels, keyboard-native controls, modal focus handling,
 loading/indexing/empty/error/retry states and contained narrow-screen tables.
 
-## Operator activation — explicit approval required
+## Operator activation — approval recorded on 23 October 2026
 
-The checked-in manifest has blank `ACCESS_AUD`, `ADMIN_EMAIL`, `ADMIN_SUB`,
-no routes and disabled workers.dev/preview URLs. This intentionally cannot serve
-the inbox until the approved owner bindings are applied and activation is
-authorized. Owner identity is held in the ignored local preparation file
+The approved manifest allows only the admin custom domain and disables
+workers.dev/preview URLs. The dedicated `ACCESS_AUD`, `ADMIN_EMAIL` and
+`ADMIN_SUB` are required encrypted secrets. Missing authorization bindings fail closed;
+owner values are held in the ignored local preparation file
 `.wrangler/admin-access-prepared.local.json`, containing **no credentials or
 JWTs**. Do not commit the owner email or upload the preparation file to a ticket.
 Regenerate it from authenticated Cloudflare APIs if the file is unavailable.
@@ -224,6 +224,12 @@ silently substituted for the operator's requested Cloudflare login.
 [Access MFA support](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/mfa-requirements/).
 
 ### Remaining activation steps
+
+The operator explicitly authorized deployment with account 2FA deferred and
+directed immediate disabling of the admin service on any failed security gate.
+Do not request the same deployment authorization again. The sequence below is
+the activation/verification checklist; preparation alone never counted as
+deployment or live acceptance.
 
 1. Obtain **explicit confirmation to deploy** this administration service with
    the current disclosed authentication state. Preparation authorization alone
