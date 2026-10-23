@@ -1,10 +1,117 @@
 # Owner-only report moderation
 
-Implementation date: 23 October 2026. **DEPLOYMENT BLOCKED; ACCESS DISABLED**.
+Implementation date: 23 October 2026. **DEPLOYED; OWNER WORKFLOW VERIFIED**.
 The operator's existing Cloudflare identity is mapped and restricted below.
-Account 2FA is **OPERATOR_DEFERRED** by explicit operator instruction. Deployment
-to this host is now explicitly authorized; live acceptance remains pending.
-Intended address: `https://admin.osia.space/reports`.
+Account 2FA was originally deferred; Cloudflare now reports it enabled. A fresh
+MFA challenge was not independently observed. A distinct unauthorized-account
+login test remains pending. Verified address: `https://admin.osia.space/reports`.
+
+## Final live verification — 23 October 2026
+
+| Item | Final observed result |
+| --- | --- |
+| Deployed source | `4446f4dd2e7c791af8bc184fe56570a986cb1876` |
+| Active Worker version | `dfc0b80b-a348-4aea-b4eb-87a5dcd0cdc3`,100% |
+| Bundle SHA256 | `f49dd216ce819f6d7f4fb225c7a14d64d5569fb267fb96ee91a14aa144044a98` |
+| Hostname root | Authenticated303 to `/reports`; real logout→root→Access login→reports verified |
+| Owner authentication | Live Cloudflare login allowed; protected shell, list and synthetic detail load |
+| Negative public HTTP probes | 32/32 denied:17 Access302 challenges,3 preflight403,12 workers.dev/preview404 |
+| Forged email/JWT/cookie/service headers | No bypass; protected list remains inaccessible |
+| Privileged API isolation | Anonymous session/list/detail/PATCH denied; cross-origin preflights denied without CORS allow headers |
+| Owner status workflow | Synthetic new→in_progress→processed→in_progress→processed; persisted after new login |
+| Concurrent update | Stale second-tab mutation rejected; UI loads current state and requires review before retry |
+| Filtering/counts/timezone | Processed filter returns only the synthetic row; final counters1 new/0 in-progress/1 processed; Europe/Paris displayed |
+| Underlying report retention | Synthetic key still expires at receipt+2,591,999.771 seconds after all mutations; no TTL extension |
+| Real report bodies | None opened or changed; only the known synthetic body/note used |
+| Private routing | Only approved custom domain; main and version-preview workers.dev disabled; no zone Worker routes |
+| Asset authorization | Deployed resources confirm `serve_directly:false`, `raw_run_worker_first:true` |
+| Owner bindings | Audience, exact owner email and Access subject are encrypted secret bindings |
+| Logging | Logpush false, no tail consumers; invocation logging disabled by deployment manifest |
+| Existing public-site Access configuration | All three pre-deployment app/policy hashes unchanged |
+| Existing ingestion | Settings hash unchanged; version `0f30cdf4-786b-4630-a376-07bb9718c5b7` still100% |
+| Native apps, public site, billing | No Mobile/site rebuild or release, no plan activation/purchase |
+
+The operator reported that login could land on the hostname root instead of
+`/reports`. The final change adds an authenticated fixed303 redirect for `/`,
+including a top-level return from Access; it cannot redirect to user-supplied
+URLs. JWT/owner verification still runs first. Worker-unit and compiled-browser
+regressions cover the root. The local QA gateway now preserves HTTP redirects
+and maps their fixed production origin back to loopback, rather than following
+them internally. The real logout/root/login test then passed in production.
+
+Only one clearly labeled synthetic report was submitted through the unchanged
+ingestion API for acceptance testing. It remains processed under the ordinary
+30-day TTL, together with minimal status audit records; no real report was
+deleted or processed. An earlier status attempt displayed a loading error while
+Access was renewing the session; after a fresh owner session, the observed state was
+reloaded and processing and concurrency tests passed. No failed attempt was
+assumed successful or silently retried as a completed mutation.
+
+The Cloudflare audit log independently records successful owner login through
+the Cloudflare provider (including23 October18:09:39 UTC). The emergency deny-all
+test recorded actual denial of that same signed-in operator while authorization
+was revoked. **A revoked-owner test and forged-token tests do not prove rejection
+of a different real account.** That separate test was requested; the operator's
+reply concerned the root redirect and supplied no second-identity result.
+It remains **OPERATOR_PENDING**, not passed. No new identity or broader Allow
+policy was created to manufacture a negative login result.
+
+Final automated checks: admin23, independent compiled-browser6, ingestion5,
+security-policy8 all passed (42 focused tests), plus TypeScript, generated
+bindings, dry-run and full OSIA/pinned Gitleaks scans. Source CI passed. All
+production changes are confined to the admin Worker/manifest; its `fetch`
+handler and all affected tests were updated together. Screenshots and probe
+JSON are ignored local evidence, not public source or credential exports.
+
+The earlier attempts below are historical evidence. Their temporary deny-all,
+blocked deployment and pending owner-workflow states are superseded by this
+final verification table; the distinct-account test remains pending.
+
+## Authenticated deployment retry — 23 October 2026
+
+The operator signed in and the existing Wrangler login was refreshed for the
+OSIA Cloudflare account only. No access to the other account or future accounts
+was selected. Only account/user read and Worker scripts/routes permissions were
+requested. The original deployment authorization remained valid.
+
+Wrangler deployed `osia-reports-admin` to the approved custom domain, with
+encrypted audience/email/subject, the existing reports KV binding, one SQLite
+DO namespace `c18c72208113480c8699149c09bf38fd`, and the minute retention cron.
+workers.dev and preview URLs are disabled. Deployed version resources confirm
+assets `serve_directly: false`, `raw_run_worker_first: true`, no HTML rewrites,
+and migration `admin-v1`. No paid plan or service was activated.
+
+The first real Access return reached the Worker but exposed a navigation bug:
+its cross-site Fetch Metadata check also rejected a legitimate top-level GET
+returning from Access. Admin Access was immediately set to deny-all and app
+sessions revoked. The fix permits only `GET /reports` with navigation/document
+metadata, retaining JWT/exact-owner checks and the explicit Origin check.
+API requests, subresources, frames and mutations have no such exception.
+[Fetch Metadata navigation policy](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Fetch_metadata).
+
+The fix is commit `41a6f35497025136dec73420dd43d762a7d0e6f1`, deployed as
+version `8b50b6c7-6996-4d3a-a216-d1a726556362`. Bundle SHA256:
+`0e5ecc0197fd92bc12f8aebf3d74fb34eb32beca77fed830be239c5f9278dac2`.
+Its CI secret scan passed. Workers-runtime tests now22 pass; browser6,
+ingestion5 and security-policy8 pass, alongside types/dry-run/source scans.
+The only production call site changed is the admin fetch isolation check.
+
+Current live unauthenticated probes:28/28 denied. Dashboard/assets/list/detail/
+session GETs and direct PATCH requests receive Access302 challenges; valid
+cross-origin OPTIONS requests receive403, without CORS allow headers. Forged
+JWT, email, cookie and service headers do not bypass Access. Main workers.dev
+and old/current version-preview URLs return404. An incomplete OPTIONS request
+was initially rejected with400; the final suite supplies valid preflight headers.
+
+The signed-in operator was genuinely denied under the emergency deny-all
+policy; this is a revoked-owner test, **not a second-account test**. Fresh owner
+admission/listing/status verification and a distinct unauthorized-account test
+are still pending during this retry. The exact-owner policy is restored only
+for the controlled live re-test and must be disabled again on a failed gate.
+
+The authenticated Cloudflare account now reports 2FA enabled, unlike its earlier
+inspection. No MFA setting was changed by the deployment agent, and a fresh MFA
+challenge has not been independently observed. Do not claim one passed.
 
 ## Deployment attempt — 23 October 2026
 
