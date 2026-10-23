@@ -95,6 +95,42 @@ describe('origin and API authorization', () => {
     expect((await call('/api/reports', { headers: { 'sec-fetch-site': 'same-site' } })).status).toBe(403);
     expect((await worker.fetch(new Request('https://alternate.workers.dev/api/reports', { headers: { 'cf-access-jwt-assertion': jwt } }), configuredEnv())).status).toBe(403);
   });
+  it('rejects workers.dev, version previews and alternative origins even with the valid owner JWT', async () => {
+    mockKeys();
+    for (const alternate of ['https://osia-reports-admin.example.workers.dev',
+      'https://version-osia-reports-admin.example.workers.dev', 'https://osia.space',
+      'https://relay.osia.space', 'http://admin.osia.space', 'https://admin.osia.space:8443']) {
+      for (const path of ['/reports', '/admin.js', '/admin.css', '/favicon.svg', '/api/session',
+        '/api/reports', '/api/reports/' + id(1)]) {
+        for (const method of ['GET', 'PATCH', 'OPTIONS', 'HEAD']) {
+          const response = await worker.fetch(new Request(alternate + path, { method, headers: {
+            'cf-access-jwt-assertion': jwt, host: 'admin.osia.space',
+            'x-forwarded-host': 'admin.osia.space', 'x-forwarded-proto': 'https',
+          } }), configuredEnv());
+          expect(response.status).toBe(403);
+          expect(response.headers.get('cache-control')).toContain('no-store');
+          expect(await response.text()).not.toContain('Synthetic');
+        }
+      }
+    }
+  });
+  it('does not authorize another account member or a matching owner email with a different subject', async () => {
+    mockKeys();
+    for (const claims of [{ email: 'member@example.com', sub: 'test-only-member' },
+      { email: 'owner@example.com', sub: 'test-only-member' },
+      { email: 'member@example.com', sub: ownerSub }]) {
+      const signed = await token(claims);
+      for (const method of ['GET', 'PATCH', 'OPTIONS']) {
+        expect((await call('/api/reports/' + id(1), { method, token: signed })).status).toBe(403);
+      }
+    }
+    // A service credential or copied email header cannot substitute for Access.
+    const response = await call('/api/reports', { token: null, headers: {
+      'cf-access-authenticated-user-email': 'owner@example.com',
+      'cf-access-client-id': 'test-only-service', 'cf-access-client-secret': 'test-only-secret',
+    } });
+    expect(response.status).toBe(401);
+  });
   it('serves authenticated shell with restrictive headers and no content or credentials', async () => {
     mockKeys();
     const response = await call('/reports'); expect(response.status).toBe(200);

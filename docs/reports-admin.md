@@ -1,13 +1,17 @@
 # Owner-only report moderation
 
-Implementation date: 23 October 2026. **NOT DEPLOYED — OPERATOR_PENDING** for
-Access configuration, owner identity/MFA and final deployment approval.
+Implementation date: 23 October 2026. **ACCESS PREPARED; SERVICE NOT DEPLOYED**.
+The operator's existing Cloudflare identity is mapped and restricted below.
+Account 2FA is **OPERATOR_DEFERRED**, and final deployment approval and live
+authentication acceptance remain **OPERATOR_PENDING**.
 Intended address: `https://admin.osia.space/reports`.
 
 This is a separate Worker, `osia-reports-admin`, in the primary `osia-worker`
 repository. It is independent of the static public site, Mobile versioning,
 native builds and store submissions. There is no new public route, workers.dev
 URL, preview URL, infrastructure purchase or production migration in this change.
+A dedicated Access application was subsequently prepared with operator
+authorization; this does not publish the administration service.
 
 ## Observed existing contract
 
@@ -157,28 +161,89 @@ loading/indexing/empty/error/retry states and contained narrow-screen tables.
 
 The checked-in manifest has blank `ACCESS_AUD`, `ADMIN_EMAIL`, `ADMIN_SUB`,
 no routes and disabled workers.dev/preview URLs. This intentionally cannot serve
-the inbox until the operator supplies identity and authorizes activation.
-Do not infer that the authenticated Cloudflare account email is the chosen admin.
+the inbox until the approved owner bindings are applied and activation is
+authorized. Owner identity is held in the ignored local preparation file
+`.wrangler/admin-access-prepared.local.json`, containing **no credentials or
+JWTs**. Do not commit the owner email or upload the preparation file to a ticket.
+Regenerate it from authenticated Cloudflare APIs if the file is unavailable.
 
-1. Confirm the **single operator email** and authorize configuring the dedicated
-   Access app, one SQLite DO namespace/migration and custom hostname. Verify
-   account plan/limits with the operator; do not buy or upgrade anything.
-2. Create a self-hosted Access application for **all of `admin.osia.space`**,
-   separate from current public-site Access applications. Default deny; exactly
-   one email Include rule, no Everyone/domain-wide Include, Bypass, service
-   authorization, reusable broad policies or alternate unprotected path.
-3. Require strong MFA. Prefer independent WebAuthn/security key MFA, required
-   each login, and a short application session (proposed1 hour). Inspect policy
-   overrides: a policy that disables MFA can override the app setting. The
-   inspected account currently exposes a Cloudflare IdP only; do not assume its
-   MFA claims or another configured IdP. Operator enrollment/login is required.
-   [Current independent MFA settings](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/mfa-requirements/).
-4. Retrieve the dedicated app AUD and operator subject from a verified Access
-   identity/login. Never paste JWTs into tickets, terminal output or browser
-   application storage. Set issuer/AUD/email/subject in Worker configuration,
-   using encrypted secret bindings for owner identity if preferred. Recheck
-   all configuration and regenerate binding types. Account management tokens
-   belong only in operator tooling, never in this Worker or its assets.
+### Access preparation verified on 23 October 2026
+
+The operator explicitly selected their authenticated Cloudflare account as the
+sole administrator. `/user.id` and `/user.email` match the existing Access user's
+`last_seen_identity.id` and email; its `account_id` matches the active account,
+and its `idp.id/type` match the existing Cloudflare provider. Its `user_uuid`
+supplies **ADMIN_SUB** (the Access JWT subject), which is distinct from the
+Cloudflare profile ID and the account membership ID. This is a verified mapping,
+not an assumption based on an account display name or organization membership.
+
+| Resource / protection | Prepared value |
+| --- | --- |
+| Dedicated self-hosted Access application | `67a9526f-2e76-4aa3-9fc3-cac552c0bb2f` |
+| Destination | Exactly `admin.osia.space`, no path restrictions or overrides |
+| Sole application-scoped policy | `700f146d-afb8-4cab-b235-e2ac64fcd0e7` |
+| Policy Include | One exact authenticated owner email |
+| Policy Require | Login method `ffbfa71d-a27f-47f7-8445-a8491b185d28` |
+| Allowed IdPs | Only that existing `cloudflare` provider; auto-redirect enabled |
+| Existing provider restriction | `restrict_to_account_members: true`, unchanged |
+| Application and policy session | `1h` |
+| Cookie protection | HttpOnly, SameSite Lax, binding cookie enabled |
+| OPTIONS / WARP bypass | Both disabled |
+| Broad or service authorization | No Everyone, domain, member/group Include, Bypass or Service Auth policy |
+| Other applications and organization | Read-back comparison unchanged |
+
+The existing provider's account-member restriction is an additional boundary;
+it does **not** authorize other members. The sole email Include plus required
+Cloudflare login and the Worker's exact subject/email checks authorize the owner.
+No Google provider, email OTP provider, new account, service token, shared
+identity or organization-wide MFA change was created.
+[Cloudflare identity provider documentation](https://developers.cloudflare.com/cloudflare-one/integrations/identity-providers/cloudflare/).
+
+The Cloudflare-managed policy test
+`1710b05abd1bfebdd724761c953515b2f95973a152c824f568cf6c6ac1cc3c16`
+completed: one known Access user, one approved, zero errors. This verifies the
+stored owner identity against the policy; the account has no second Access
+identity to test. It does not prove a fresh login, MFA or an unauthorized real
+user challenge. Synthetic signed-token regressions independently deny another
+subject with the owner email, the owner subject with another email, another
+member, and service/email headers without a JWT.
+
+**MFA disclosure:** authenticated `/user` and the matching account membership
+currently report `two_factor_authentication_enabled: false`; no independent
+Access MFA is configured. The operator explicitly requested continuing and
+will enable account 2FA later. This is **OPERATOR_DEFERRED**, not MFA verified.
+Reuse strong Cloudflare account authentication when enabled, preferably a
+security key/Windows Hello or authenticator app; do not introduce email OTP or
+another identity provider. Cloudflare IdP authentication uses Cloudflare account
+security, but neither the policy test nor JWT signature alone proves a fresh
+MFA challenge. Do not add an unverified `auth_method` rule: Cloudflare's documented
+IdP MFA selector support does not list the Cloudflare provider. An independent
+Access MFA deployment would be a distinct configuration choice, not something
+silently substituted for the operator's requested Cloudflare login.
+[Cloudflare account 2FA](https://developers.cloudflare.com/fundamentals/user-profiles/2fa/),
+[Access MFA support](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/mfa-requirements/).
+
+### Remaining activation steps
+
+1. Obtain **explicit confirmation to deploy** this administration service with
+   the current disclosed authentication state. Preparation authorization alone
+   is not deployment authorization. Recheck account 2FA and record its actual
+   state without silently overriding the operator's deferral. Verify existing
+   account plan/limits; do not buy or upgrade anything.
+2. Re-read the dedicated Access app, policies, IdP and owner identity immediately
+   before deployment. Require the exact host, one exact owner email, pinned
+   Cloudflare provider, no broad policy/path override, no WARP/preflight bypass,
+   and the same Access subject. Check for more-specific or wildcard Access apps
+   that could match the host; preserve public-site configuration.
+3. Apply the dedicated AUD and verified owner email/subject from the private
+   preparation file or fresh API reads. Never paste JWTs into tickets, terminal
+   output or browser application storage. Use encrypted Worker secret bindings
+   for owner identity; keep account management tokens outside the Worker/assets.
+   Keep the Worker signature, issuer, audience, app type, email and subject
+   validation intact; recheck all configuration and binding types.
+4. Verify no existing admin Worker/custom domain/DNS or alternate route has
+   appeared. Confirm the private reports binding, new SQLite namespace/migration
+   and unique rate namespace12105; do not bind the DO to another service.
 5. After final deployment approval, add **only** the custom domain route for
    `admin.osia.space` in `wrangler.admin.jsonc` (`custom_domain: true`) and deploy
    that manifest only. Keep workers.dev and preview URLs disabled. Do not deploy
@@ -191,8 +256,10 @@ Do not infer that the authenticated Cloudflare account email is the chosen admin
    Use only synthetic reports for probes, delete no real content, and verify
    ingestion version/bindings remain unchanged. Record results in Linear.
 
-Until those steps run, live authentication/MFA, custom-domain behavior, cron
+Until those steps run, live authentication, custom-domain behavior, cron
 execution and production acceptance are **OPERATOR_PENDING**, not passed.
+Owner account 2FA remains **OPERATOR_DEFERRED** until the operator enables it;
+report the live state honestly even if deployment is separately approved.
 Rollback removes/disables the admin custom domain and Access app, with owner
 approval as appropriate; retain the private moderation namespace for orderly
 rollback and retention maintenance. Never delete or migrate ingestion KV, and
@@ -255,6 +322,27 @@ expiry during I/O, no TTL extension, audit privacy and deletion. Browser tests
 exercise America/New_York calendar boundaries; manual synthetic inspection also
 checked Europe/Paris and French. Tests caught and fixed the30-day browser timer
 overflow and a table accessibility label escaping its narrow scroll container.
+
+Access-preparation follow-up: the admin suite now passes **21 tests**, adding
+168 combinations of alternate host/protocol/port, page/asset/API and HTTP method
+with a correctly signed owner JWT and spoofed forwarding/Host headers. All are
+denied with403/no-store. Exact owner-claim pairing and service-header rejection
+are also covered. Independent compiled-Worker browser6, ingestion5, security
+policy8, TypeScript and dry-run were rerun successfully (40 focused tests).
+Production Worker source and the dry-run bundle hash are unchanged. The full
+OSIA/pinned Gitleaks secret scan is clean. All existing Worker rate bindings
+were inspected: proposed namespace12105 is unused. The ingestion deployment
+still serves version `0f30cdf4-786b-4630-a376-07bb9718c5b7` at100 percent.
+
+Cloudflare inspection confirms no admin DNS record, Worker, custom domain or
+zone Worker route; thus workers.dev and version preview endpoints do not exist
+for this service. The manifest disables both when deployed. Static assets run
+through the same authenticated Worker. A team-domain login-path probe returned
+404 before any admin hostname deployment; it is not evidence of live admission
+or denial. Whole-host owner login, anonymous/unauthorized direct requests,
+Access cookie redirects, alternative deployed routes and Cloudflare MFA still
+require the post-deployment acceptance checks above. Real report bodies were
+not read during this preparation.
 
 Call sites: admin `fetch` owns authorization and routing; the same Worker's cron
 calls `maintenance`; dashboard calls session/list/detail/status only. Existing
