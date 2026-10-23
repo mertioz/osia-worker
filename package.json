@@ -15,11 +15,26 @@
     "tail": "wrangler tail",
     "tail:relay": "wrangler tail osia-relay",
     "kv:create": "wrangler kv namespace create KV_RENDEZVOUS",
-    "whoami": "wrangler whoami"
+    "whoami": "wrangler whoami",
+    "test:reports": "node --test test/content_reports.test.js",
+    "test:admin": "vitest run --config vitest.admin.config.js",
+    "test:admin:browser": "npm run build:admin && playwright test --config playwright.admin.config.mjs",
+    "typecheck:admin": "tsc --project tsconfig.admin.json",
+    "types:admin": "wrangler types --config wrangler.admin.jsonc --include-runtime=false --strict-vars=false admin-configuration.d.ts",
+    "build:admin": "wrangler deploy --config wrangler.admin.jsonc --dry-run --outdir dist/admin",
+    "preview:admin": "npm run build:admin && node scripts/admin_preview.mjs"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.18.8",
-    "vitest": "^4.1.10",
-    "wrangler": "4.114.0"
+    "@cloudflare/vitest-plugin": "1.4.7",
+    "@cloudflare/workers-types": "5.20261023.1",
+    "@playwright/test": "1.64.1",
+    "@types/node": "26.6.5",
+    "miniflare": "5.20261019.2-beta",
+    "typescript": "7.0.2",
+    "vitest": "4.1.12",
+    "wrangler": "4.152.0"
+  },
+  "dependencies": {
+    "jose": "6.2.13"
   }
 }

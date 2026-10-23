@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow"><title>OSIA · Reports</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/admin.css"><script type="module" src="/admin.js"></script>
+</head>
+<body>
+  <a class="skip" href="#content" data-i18n="skip">Skip to reports</a>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand"><span class="orb" aria-hidden="true"></span> OSIA <span class="admin">ADMIN</span></div>
+      <p class="overline" data-i18n="workspace">PRIVATE WORKSPACE</p>
+      <a class="nav-item" href="/reports" aria-current="page"><span aria-hidden="true">▤</span><span data-i18n="reports">Content reports</span></a>
+      <div class="sidebar-foot"><span class="lock" aria-hidden="true">◇</span><div><strong data-i18n="owner">Owner access</strong><p data-i18n="private">Private moderation inbox</p></div></div>
+    </aside>
+    <div class="workspace">
+      <header><span data-i18n="administration">Administration / Reports</span><div class="header-actions"><span class="secure" data-i18n="protected">Access protected</span><label class="sr-only" for="language">Language / Langue</label><select id="language"><option value="en">English</option><option value="fr">Français</option></select><a class="logout" href="/cdn-cgi/access/logout" data-i18n="logout">Sign out</a></div></header>
+      <main id="content">
+        <div class="page-heading"><div><p class="overline" data-i18n="trust">TRUST & SAFETY</p><h1 data-i18n="reports">Content reports</h1><p class="subtitle" data-i18n="intro">Review what users chose to share. Track each report through resolution.</p></div><button id="refresh" class="secondary" data-i18n="refresh">Refresh inbox</button></div>
+        <div id="alert" class="alert" role="alert" hidden></div>
+        <section class="stats" aria-label="Report status counts">
+          <button class="stat" data-status="new"><span data-i18n="new">New</span><strong id="count-new">—</strong><small data-i18n="awaiting">Awaiting review</small></button>
+          <button class="stat" data-status="in_progress"><span data-i18n="in_progress">In progress</span><strong id="count-in_progress">—</strong><small data-i18n="reviewing">Read, under review</small></button>
+          <button class="stat" data-status="processed"><span data-i18n="processed">Processed</span><strong id="count-processed">—</strong><small data-i18n="completed">Review completed</small></button>
+        </section>
+        <p class="count-note" data-i18n="countNote">Counts use the date and category filters, across all statuses.</p>
+        <section class="inbox" aria-labelledby="inbox-title">
+          <div class="inbox-heading"><h2 id="inbox-title" data-i18n="inbox">Report inbox</h2><span class="tag" data-i18n="newest">Newest first</span></div>
+          <form id="filters" class="filters">
+            <label><span data-i18n="category">Category</span><select id="category" name="category"><option value="" data-i18n="allCategories">All categories</option><option value="harmful" data-i18n="harmful">Harmful</option><option value="sexual" data-i18n="sexual">Sexual content</option><option value="violence" data-i18n="violence">Violence</option><option value="deceptive" data-i18n="deceptive">Deceptive</option><option value="other" data-i18n="other">Other</option></select></label>
+            <label><span data-i18n="status">Status</span><select id="status" name="status"><option value="" data-i18n="allStatuses">All statuses</option><option value="new" data-i18n="new">New</option><option value="in_progress" data-i18n="in_progress">In progress</option><option value="processed" data-i18n="processed">Processed</option></select></label>
+            <label><span data-i18n="from">From</span><input id="from" type="date" name="from"></label>
+            <label><span data-i18n="to">Through</span><input id="to" type="date" name="to"></label>
+            <button type="submit" class="primary" data-i18n="apply">Apply filters</button><button type="reset" class="text-button" data-i18n="reset">Reset</button>
+          </form>
+          <div class="table-wrap"><table><thead><tr><th data-i18n="received">Received</th><th data-i18n="category">Category</th><th data-i18n="reference">Report reference</th><th data-i18n="status">Status</th><th><span class="sr-only" data-i18n="review">Review</span></th></tr></thead><tbody id="rows"></tbody></table></div>
+          <div id="state" class="state" role="status" aria-live="polite"></div>
+          <div class="pagination"><span id="page-label"></span><div><button id="previous" class="secondary" disabled data-i18n="previous">Previous</button><button id="next" class="secondary" disabled data-i18n="next">Next</button></div></div>
+        </section>
+        <footer><p><span class="dot" aria-hidden="true"></span><span id="sync-label"></span></p><p id="timezone"></p><p data-i18n="retention">Reports and moderation records expire automatically after 30 days. Processing never extends retention.</p></footer>
+      </main>
+    </div>
+  </div>
+  <dialog id="detail" aria-labelledby="detail-title"><div class="detail-top"><div><p class="overline" data-i18n="review">REVIEW</p><h2 id="detail-title" data-i18n="reportDetail">Report detail</h2></div><button id="close-detail" class="icon-button" aria-label="Close / Fermer">×</button></div><div id="detail-content"></div></dialog>
+</body>
+</html>

@@ -18,6 +18,11 @@ These are technical bounds for this one support operation, not Chat limits.
 
 ## Operator handling
 
+The separate owner dashboard is implemented in `wrangler.admin.jsonc` and
+`src/admin/`, with deployment intentionally pending. See
+[admin security, workflow and activation](reports-admin.md). Its read/status
+layer leaves this ingestion Worker, request schema and KV TTL unchanged.
+
 Open the private namespace in the authenticated Cloudflare account. Filter keys
 by `report:`; metadata contains the category and receipt time. Review reports
 for harmful/deceptive output, investigate the relevant provider/product behavior,

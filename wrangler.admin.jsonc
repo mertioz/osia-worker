@@ -1,0 +1,38 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "osia-reports-admin",
+  "main": "src/admin/index.ts",
+  "compatibility_date": "2026-10-23",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  // Intentionally no route. Add admin.osia.space only after operator approval
+  // and after a whole-host Access application with single-owner MFA exists.
+  "vars": {
+    "ADMIN_ORIGIN": "https://admin.osia.space",
+    "ACCESS_ISSUER": "https://odd-hat-37c6.cloudflareaccess.com",
+    "ACCESS_AUD": "",
+    "ADMIN_EMAIL": "",
+    "ADMIN_SUB": ""
+  },
+  "assets": {
+    "directory": "./admin/public",
+    "binding": "ADMIN_ASSETS",
+    "run_worker_first": true,
+    "html_handling": "none",
+    "not_found_handling": "none"
+  },
+  "kv_namespaces": [
+    { "binding": "CONTENT_REPORTS", "id": "9cce45e1aa9c497cb6bfc8d76ac8986e" }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "MODERATION", "class_name": "ModerationInbox" }]
+  },
+  "migrations": [{ "tag": "admin-v1", "new_sqlite_classes": ["ModerationInbox"] }],
+  "ratelimits": [
+    { "name": "ADMIN_EDGE_LIMITER", "namespace_id": "12105", "simple": { "limit": 60, "period": 60 } }
+  ],
+  "triggers": { "crons": ["* * * * *"] },
+  // Administrative audit events live in the private DO, never in request logs.
+  "observability": { "enabled": false }
+}

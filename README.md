@@ -1,5 +1,10 @@
 # OSIA Rendezvous Worker (WOR-64)
 
+This repository also contains the separate private [content-report ingestion](docs/content-reports.md)
+and [owner moderation dashboard](docs/reports-admin.md). The dashboard has its
+own Worker manifest; activation requires owner Access/MFA configuration and
+explicit deployment approval.
+
 A tiny, security-first Cloudflare Worker that maps a **rendezvous key** → a PC's
 **current Cloudflare quick-tunnel URL**. It lets a phone that holds the OSIA
 token reach its **own** PC over the internet, even though the PC's tunnel URL
