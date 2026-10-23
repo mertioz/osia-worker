@@ -1,10 +1,69 @@
 # Owner-only report moderation
 
-Implementation date: 23 October 2026. **DEPLOYMENT AUTHORIZED; VALIDATION IN PROGRESS**.
+Implementation date: 23 October 2026. **DEPLOYMENT BLOCKED; ACCESS DISABLED**.
 The operator's existing Cloudflare identity is mapped and restricted below.
 Account 2FA is **OPERATOR_DEFERRED** by explicit operator instruction. Deployment
 to this host is now explicitly authorized; live acceptance remains pending.
 Intended address: `https://admin.osia.space/reports`.
+
+## Deployment attempt — 23 October 2026
+
+The authorized deployment source is
+`abb9da1c9c39d652632bea8e8aabc0f31d606c2b`; its GitHub secret-scan workflow
+passed. The manifest adds only the approved admin custom domain and declares
+`ACCESS_AUD`, `ADMIN_EMAIL`, `ADMIN_SUB` as required encrypted bindings. The
+validated bundle still has SHA256
+`c41b4569443b712cba32865316eabb88a6fab56601e070f2f05dc14b8fa4110a`.
+
+Immediately before deployment, the dedicated whole-host Access app and exact
+owner/Cloudflare-IdP policy were re-read and passed their configuration checks.
+No overlapping wildcard/path application or alternative Worker route was found.
+The existing provider and exact owner subject mapping were unchanged.
+
+**Deployment did not complete.** The local Wrangler OAuth credential was expired
+and could not refresh. An attempted official API static-assets upload returned
+HTTP401 before uploading the Worker. No Worker, DO migration, admin DNS/custom
+domain or cron was deployed. The management connector could prepare an upload
+session but its upload path failed authentication; the returned asset token was
+never printed, persisted, committed or sent to a browser.
+
+As directed, the sole dedicated admin policy
+`700f146d-afb8-4cab-b235-e2ac64fcd0e7` was immediately changed to **deny Everyone**
+and read back successfully. This is an emergency deny-all state, not the earlier
+owner Allow policy. Do not describe the service as available. Restore the exact
+owner email Include and pinned Cloudflare login Require only after deployment
+authentication is repaired and the security preflight is repeated. The recorded
+deployment authorization remains valid; another approval is not required.
+
+A scoped Wrangler OAuth re-login was started but timed out without an operator
+authorization response. A fresh normal Cloudflare sign-in tab is left for the
+operator. No Google/OTP Access provider, account, paid plan or service was added.
+The billing endpoint was not accessible through the OAuth management connection;
+no billing mutation was attempted. SQLite DO/static assets are supported on
+Workers Free, so no plan activation or upgrade is part of deployment.
+[Cloudflare DO plan availability](https://developers.cloudflare.com/durable-objects/platform/pricing/).
+
+Actual results for this attempt:
+
+| Gate | Result |
+| --- | --- |
+| Exact-owner mapping, whole-host Access, no broad Allow/Bypass | Passed before upload |
+| Emergency deny-all policy read-back | Passed after HTTP401 |
+| Admin Worker/custom domain/DNS inventory | None present |
+| Existing public-site apps/policies | Exact configuration hashes unchanged |
+| Existing ingestion settings/deployment | Unchanged; version `0f30cdf4-786b-4630-a376-07bb9718c5b7` |
+| Workers-runtime security/state tests | 21 passed |
+| Independent compiled-Worker browser tests | 6 passed |
+| Types, TypeScript, dry-run, source secret scan | Passed |
+| Real owner login / unauthorized account login | NOT RUN — deployment authentication blocked |
+| Live anonymous/direct API/alternative-host checks | NOT RUN — no deployed service |
+| Live report listing and status updates | NOT RUN — no deployed service |
+| Cloudflare account 2FA | OPERATOR_DEFERRED, not verified |
+
+Continue with an authenticated Wrangler login, revalidate all settings, apply
+owner bindings privately and deploy only `wrangler.admin.jsonc`. After actual
+deployment, run the live acceptance matrix below. A missing real second-account
+test is pending evidence, not permission to invent an unauthorized-login result.
 
 This is a separate Worker, `osia-reports-admin`, in the primary `osia-worker`
 repository. It is independent of the static public site, Mobile versioning,
@@ -231,9 +290,8 @@ Do not request the same deployment authorization again. The sequence below is
 the activation/verification checklist; preparation alone never counted as
 deployment or live acceptance.
 
-1. Obtain **explicit confirmation to deploy** this administration service with
-   the current disclosed authentication state. Preparation authorization alone
-   is not deployment authorization. Recheck account 2FA and record its actual
+1. **Explicit deployment confirmation is recorded**, including the current
+   disclosed authentication state. Recheck account 2FA and record its actual
    state without silently overriding the operator's deferral. Verify existing
    account plan/limits; do not buy or upgrade anything.
 2. Re-read the dedicated Access app, policies, IdP and owner identity immediately
