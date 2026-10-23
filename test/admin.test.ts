@@ -118,6 +118,7 @@ describe('origin and API authorization', () => {
     mockKeys();
     for (const site of ['cross-site', 'same-site']) {
       const headers = { 'sec-fetch-site': site, 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'document' };
+      expect((await call('/', { headers })).status).toBe(303);
       expect((await call('/reports', { headers })).status).toBe(200);
       expect((await call('/reports', { headers, token: null })).status).toBe(401);
       expect((await call('/reports', { headers, token: await token({ sub: 'stranger' }) })).status).toBe(403);
@@ -128,6 +129,15 @@ describe('origin and API authorization', () => {
       expect((await call('/reports', { headers: { ...headers, 'sec-fetch-mode': 'cors' } })).status).toBe(403);
       expect((await call('/reports', { headers: { ...headers, 'sec-fetch-dest': 'iframe' } })).status).toBe(403);
     }
+  });
+  it('redirects the authenticated hostname root to reports without an open redirect', async () => {
+    mockKeys();
+    const response = await call('/?redirect=https://attacker.example');
+    expect(response.status).toBe(303);
+    expect(response.headers.get('location')).toBe(origin + '/reports');
+    expect(response.headers.get('cache-control')).toContain('no-store');
+    expect((await call('/', { token: null })).status).toBe(401);
+    expect((await call('/', { token: await token({ sub: 'stranger' }) })).status).toBe(403);
   });
   it('does not authorize another account member or a matching owner email with a different subject', async () => {
     mockKeys();

@@ -1,10 +1,11 @@
 import { test, expect } from '@playwright/test';
 const firstId = '00000000-0000-4000-8000-000000000001';
 
-test('compiled Worker: stable loading, chronological pagination and owner timezone', async ({ page }) => {
+test('compiled Worker: root redirect, stable loading, chronological pagination and owner timezone', async ({ page }) => {
   const requests = [];
   page.on('request', request => { if (request.url().includes('/api/')) requests.push(request.url()); });
-  await page.goto('/reports');
+  await page.goto('/');
+  await expect(page).toHaveURL('http://127.0.0.1:8790/reports');
   await expect(page.locator('#rows tr')).toHaveCount(25);
   await expect(page.locator('#count-new')).toHaveText('27');
   await expect(page.locator('#count-in_progress')).toHaveText('2');

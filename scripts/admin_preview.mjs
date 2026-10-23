@@ -47,7 +47,7 @@ for (let n = 1; n <= 32; n++) {
 async function dispatch(path, options = {}) {
   const headers = new Headers(options.headers);
   headers.set('cf-access-jwt-assertion', jwt);
-  return mf.dispatchFetch(origin + path, { ...options, headers });
+  return mf.dispatchFetch(origin + path, { ...options, headers, redirect: 'manual' });
 }
 const first = await dispatch('/api/reports');
 if (first.status !== 200) throw new Error('Compiled Worker preview initialization failed: ' + first.status);
@@ -67,7 +67,14 @@ const server = createServer(async (request, response) => {
     if (headers.get('origin') === 'http://127.0.0.1:8790') headers.set('origin', origin);
     const chunks = []; for await (const chunk of request) chunks.push(chunk);
     const result = await dispatch(request.url, { method: request.method, headers, ...(chunks.length ? { body: Buffer.concat(chunks) } : {}) });
-    response.writeHead(result.status, Object.fromEntries(result.headers)); response.end(Buffer.from(await result.arrayBuffer()));
+    const responseHeaders = new Headers(result.headers);
+    const location = responseHeaders.get('location');
+    if (location) {
+      const target = new URL(location, origin);
+      if (target.origin !== origin) throw new Error('Unexpected synthetic preview redirect');
+      responseHeaders.set('location', 'http://127.0.0.1:8790' + target.pathname + target.search);
+    }
+    response.writeHead(result.status, Object.fromEntries(responseHeaders)); response.end(Buffer.from(await result.arrayBuffer()));
   } catch { response.writeHead(503).end('Synthetic preview unavailable'); }
 });
 server.listen(8790, '127.0.0.1', () => console.log('Synthetic compiled Worker preview: http://127.0.0.1:8790/reports'));
