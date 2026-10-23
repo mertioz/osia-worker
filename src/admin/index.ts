@@ -14,7 +14,11 @@ export default {
       const url = new URL(request.url);
       requireThat(url.origin === env.ADMIN_ORIGIN, 403, 'origin_denied');
       requireThat(!request.headers.has('origin') || request.headers.get('origin') === env.ADMIN_ORIGIN, 403, 'origin_denied');
-      requireThat(!['cross-site', 'same-site'].includes(request.headers.get('sec-fetch-site') || ''), 403, 'origin_denied');
+      // Access returns from a different site. Permit its top-level shell GET;
+      // JWT/owner checks still apply, and no API or mutation uses this exception.
+      const shellNavigation = request.method === 'GET' && url.pathname === '/reports' &&
+        request.headers.get('sec-fetch-mode') === 'navigate' && request.headers.get('sec-fetch-dest') === 'document';
+      requireThat(shellNavigation || !['cross-site', 'same-site'].includes(request.headers.get('sec-fetch-site') || ''), 403, 'origin_denied');
       const limit = await env.ADMIN_EDGE_LIMITER.limit({ key: request.headers.get('cf-connecting-ip') || 'unknown' });
       requireThat(limit.success, 429, 'rate_limited');
       const identity = await authenticate(request, env);

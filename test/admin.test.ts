@@ -114,6 +114,21 @@ describe('origin and API authorization', () => {
       }
     }
   });
+  it('allows the authenticated Access return navigation only to the shell, never APIs or mutations', async () => {
+    mockKeys();
+    for (const site of ['cross-site', 'same-site']) {
+      const headers = { 'sec-fetch-site': site, 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'document' };
+      expect((await call('/reports', { headers })).status).toBe(200);
+      expect((await call('/reports', { headers, token: null })).status).toBe(401);
+      expect((await call('/reports', { headers, token: await token({ sub: 'stranger' }) })).status).toBe(403);
+      expect((await call('/reports', { headers: { ...headers, origin: 'https://attacker.example' } })).status).toBe(403);
+      for (const path of ['/api/session', '/api/reports', '/api/reports/' + id(1), '/admin.js', '/index.html'])
+        expect((await call(path, { headers })).status).toBe(403);
+      expect((await call('/reports', { method: 'PATCH', headers })).status).toBe(403);
+      expect((await call('/reports', { headers: { ...headers, 'sec-fetch-mode': 'cors' } })).status).toBe(403);
+      expect((await call('/reports', { headers: { ...headers, 'sec-fetch-dest': 'iframe' } })).status).toBe(403);
+    }
+  });
   it('does not authorize another account member or a matching owner email with a different subject', async () => {
     mockKeys();
     for (const claims of [{ email: 'member@example.com', sub: 'test-only-member' },
